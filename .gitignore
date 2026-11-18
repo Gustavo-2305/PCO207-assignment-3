@@ -53,3 +53,8 @@ rsconnect/
 src/*.o
 src/*.so
 src/*.dll
+
+# Others
+data/*
+!data/df_oulad.csv
+plot/*
