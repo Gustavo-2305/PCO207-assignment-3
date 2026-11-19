@@ -11,13 +11,15 @@ library(fastDummies)
 
 # creates a table for the PCA
 # selects only active columns and converts factors to ranked numbers
-oulad_pca <- oulad %>% select(c(9, 11, 12)) 
-# %>%
-#   mutate(
-#     highest_education = highest_education %>%
-#       fct_relevel("No Formal quals", "Lower Than A Level", "A Level or Equivalent", "HE Qualification", "Post Graduate Qualification") %>%
-#       as.numeric()
-#   )
+oulad_pca <- oulad %>% select(c(1, 6, 9, 11, 12)) %>%
+  mutate(
+    code_module = code_module %>%
+      fct_relevel("AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG") %>%
+      as.numeric(),
+    highest_education = highest_education %>%
+      fct_relevel("No Formal quals", "Lower Than A Level", "A Level or Equivalent", "HE Qualification", "Post Graduate Qualification") %>%
+      as.numeric()
+  )
 glimpse(oulad_pca)
 
 # scale.unit = TRUE: centers and divides each variable by their standard deviation
@@ -44,8 +46,8 @@ print(plot2)
 
 # col.var = "black": sets the colors of arrows and labels
 # axes = c(1,2): PC1 on x-aixs; PC2 on y-axis
-# select.var = list(contrib = 4): selects up to the four highest-contributing variables for each axis 
-plot3 = fviz_pca_var(pca_result, col.var = 'black', axes = c(1,2), select.var = list(contrib = 4), title = "First PCA of var")
+# select.var = list(contrib = 5): selects up to the five highest-contributing variables for each axis 
+plot3 = fviz_pca_var(pca_result, col.var = 'black', axes = c(1,2), select.var = list(contrib = 5), title = "First PCA of var")
 print(plot3)
 
 # oulad$final_result: uses the final result to color the points
