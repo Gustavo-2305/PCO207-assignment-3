@@ -29,8 +29,14 @@ col2 = colorRampPalette(c('darkred', 'white', 'darkblue'))
 
 # pca_result$var$coord: variables on the rows; components on the columns
 # is.corr = FALSE: treats the entry as a generic matrix
-# col = col2(20): generates a 20 color pallete from the previously defined col2 gradient
+# col = col2(20): generates a 20 color palette from the previously defined col2 gradient
 # mar: defines the graph margins
 # cl.offset: defines the legend offset
 plot1 = corrplot(pca_result$var$coord, is.coord = FALSE, col = col2(20), mar = c(0,0,2,0), cl.offset = 0.2, title = "Title...")
 print(plot1)
+
+# fviz_eig(): percentage of variance explained be each component
+# addlabels = TRUE: writes percentages on the plot
+# ylim = c(0, 100): sets y-axis limits from 0 to 100
+plot2 = fviz_eig(pca_result, addlabels = TRUE, ylim = c(0, 100))
+print(plot2)
