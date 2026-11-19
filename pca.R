@@ -52,3 +52,6 @@ print(plot3)
 # geom.ind = "point": hides the labels
 plot4 = fviz_pca_ind(pca_result, col.ind = oulad$final_result, axes = c(1, 2), geom.ind = "point", title = "First PCA of ind")
 print(plot4)
+
+plot5 = fviz_pca_biplot(pca_result, axes = c(1, 2), col.var = "black", col.ind = oulad$final_result, geom.ind = "point", title = "First PCA biplot")
+print(plot5)
