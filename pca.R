@@ -44,6 +44,11 @@ print(plot2)
 
 # col.var = "black": sets the colors of arrows and labels
 # axes = c(1,2): PC1 on x-aixs; PC2 on y-axis
-# select.var = list(contrib = 6): selects up to the fou highest-contributing variables for each axis 
+# select.var = list(contrib = 4): selects up to the four highest-contributing variables for each axis 
 plot3 = fviz_pca_var(pca_result, col.var = 'black', axes = c(1,2), select.var = list(contrib = 4), title = "First PCA of var")
 print(plot3)
+
+# oulad$final_result: uses the final result to color the points
+# geom.ind = "point": hides the labels
+plot4 = fviz_pca_ind(pca_result, col.ind = oulad$final_result, axes = c(1, 2), geom.ind = "point", title = "First PCA of ind")
+print(plot4)
