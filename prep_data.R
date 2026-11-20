@@ -9,6 +9,9 @@ prep_data <- function() {
       gender = as.factor(gender),
       region = as.factor(region),
       highest_education = as.factor(highest_education),
+      imd_band = as.character(imd_band),
+      imd_band = na_if(imd_band, "?"),
+      imd_band = recode(imd_band, "10-20" = "10-20%"),
       imd_band = as.factor(imd_band),
       age_band = as.factor(age_band),
       final_result = as.factor(final_result)
