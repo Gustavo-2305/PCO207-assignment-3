@@ -9,26 +9,39 @@ source("prep_data.R")
 oulad <- prep_data()
 glimpse(oulad)
 
-# creates a table for the PCA
-# selects only active columns and converts factors to ranked numbers
-oulad <- oulad %>% 
-  filter(!is.na(total_clicks), !is.na(avg_grade)) %>%
-  mutate(
-    imd_band = imd_band %>%
-      fct_relevel("0-10%", "10-20%", "20-30%", "30-40%", "40-50%", "50-60%", "60-70%", "70-80%", "80-90%", "90-100%") %>%
-      as.numeric(),
-    highest_education = highest_education %>%
-      fct_relevel("No Formal quals", "Lower Than A Level", "A Level or Equivalent", "HE Qualification", "Post Graduate Qualification") %>%
-      as.numeric()
-  )
-  
+# sets the upper limit for total_click's outliers
+Q1 <- quantile(oulad$total_clicks, 0.25, na.rm = TRUE)
+Q3 <- quantile(oulad$total_clicks, 0.75, na.rm = TRUE)
+IQR_value <- IQR(oulad$total_clicks, na.rm = TRUE)
+upper_limit <- Q3 + 1.5 * IQR_value
+
+oulad <- oulad %>%
+  filter(total_clicks <= upper_limit)
+  # mutate(
+  #   imd_band = imd_band %>%
+  #     fct_relevel("0-10%", "10-20%", "20-30%", "30-40%", "40-50%", "50-60%", "60-70%", "70-80%", "80-90%", "90-100%") %>%
+  #     as.numeric(),
+  #   highest_education = highest_education %>%
+  #     fct_relevel("No Formal quals", "Lower Than A Level", "A Level or Equivalent", "HE Qualification", "Post Graduate Qualification") %>%
+  #     as.numeric()
+  # )
+
 oulad_pca <- oulad %>%
-  select(total_clicks, avg_grade, final_result) %>%
+  select(total_clicks, avg_grade, final_result, gender, age_band) %>%
   mutate(
-    total_clicks = log1p(total_clicks), # converts total_clicks to a log scale
-    final_result = final_result %>%
-      fct_relevel("Withdrawn", "Fail", "Pass", "Distinction") %>%
-      as.numeric()
+    final_result = case_when(
+      final_result %in% c("Withdrawn", "Fail") ~ 1,
+      final_result %in% c("Pass", "Distinction") ~ 2,
+      TRUE ~ NA_real_
+    ),
+    gender = gender %>%
+      fct_relevel("M", "F") %>%
+      as.numeric(),
+    age_band = case_when(
+      age_band == "0-35" ~ 1,
+      age_band %in% c("35-55", "55<=") ~ 2,
+      TRUE ~ NA_real_
+    )
   )
   
 glimpse(oulad_pca)
