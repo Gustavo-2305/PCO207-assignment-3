@@ -2,7 +2,7 @@
 # ANÁLISE DE CORRESPONDÊNCIAS MÚLTIPLAS (MCA) - DATASET OULAD
 # ==============================================================================
 
-# 1. PACOTES E DEPENDÊNCIAS ----------------------------------------------------
+# 1. DEPENDÊNCIAS --------------------------------------------------------------
 library(tidyverse)
 library(ggrepel)
 library(FactoMineR)
@@ -38,65 +38,149 @@ update_geom_defaults("text", list(family = "roboto"))
 update_geom_defaults("text_repel", list(family = "roboto"))
 
 # Setas nas bordas inferior e esquerda (gráficos restritos ao 1º quadrante)
-tema_bordas <- theme(
+theme_border_axes <- theme(
   axis.line = element_line(
     color = "black",
     arrow = grid::arrow(length = grid::unit(0.2, "cm"), type = "closed")
   )
 )
 
-# 3. FUNÇÕES AUXILIARES DE GRÁFICOS E EXPORTAÇÃO -------------------------------
+# 3. DICIONÁRIOS DE RÓTULOS E FUNÇÕES AUXILIARES -------------------------------
+output_dir <- "figures"
+dir.create(output_dir, showWarnings = FALSE)
 
-# Remove linhas tracejadas padrão (x = 0, y = 0) inseridas pelo factoextra
-remover_linhas_tracejadas <- function(p) {
-  p$layers <- Filter(
-    function(l) !inherits(l$geom, c("GeomHline", "GeomVline")),
-    p$layers
+var_labels <- c(
+  gender = "Gênero",
+  age_band = "Faixa Etária",
+  highest_education = "Escolaridade",
+  imd_band = "Faixa IMD",
+  region = "Região",
+  code_module = "Módulo",
+  final_result = "Resultado Final"
+)
+
+category_labels <- list(
+  gender = c(
+    "M" = "Masculino",
+    "F" = "Feminino"
+  ),
+  age_band = c(
+    "0-35" = "0 a 35 anos",
+    "35-55" = "35 a 55 anos",
+    "55<=" = "55 anos ou mais"
+  ),
+  highest_education = c(
+    "No Formal quals" = "Sem qualificação formal",
+    "Lower Than A Level" = "Inferior ao Ensino Médio",
+    "A Level or Equivalent" = "Ensino Médio ou equivalente",
+    "HE Qualification" = "Ensino Superior",
+    "Post Graduate Qualification" = "Pós-graduação"
+  ),
+  region = c(
+    "East Anglian Region" = "East Anglia",
+    "Scotland" = "Escócia",
+    "North Western Region" = "Noroeste da Inglaterra",
+    "South East Region" = "Sudeste da Inglaterra",
+    "West Midlands Region" = "West Midlands",
+    "Wales" = "País de Gales",
+    "North Region" = "Norte da Inglaterra",
+    "South Region" = "Sul da Inglaterra",
+    "Ireland" = "Irlanda",
+    "South West Region" = "Sudoeste da Inglaterra",
+    "East Midlands Region" = "East Midlands",
+    "Yorkshire Region" = "Yorkshire",
+    "London Region" = "Londres"
+  ),
+  final_result = c(
+    "Pass" = "Aprovado",
+    "Fail" = "Reprovado",
+    "Withdrawn" = "Desistente",
+    "Distinction" = "Distinção"
   )
-  p
+)
+
+translate_labels <- function(values, label_map) {
+  if (is.null(label_map)) {
+    return(values)
+  }
+  
+  if (is.factor(values)) {
+    orig_levels <- levels(values)
+    new_levels <- ifelse(
+      orig_levels %in% names(label_map),
+      unname(label_map[orig_levels]),
+      orig_levels
+    )
+    levels(values) <- new_levels
+    return(values)
+  }
+  
+  translated <- ifelse(
+    values %in% names(label_map),
+    unname(label_map[values]),
+    values
+  )
+  factor(translated)
 }
 
-# Adiciona eixos cartesianos cruzando na origem (0, 0) sem dupla expansão de escala
-eixos_centrais <- function(p) {
-  p <- remover_linhas_tracejadas(p)
+format_dim_label <- function(mca_res, dim_index) {
+  pct <- formatC(
+    mca_res$eig[dim_index, 2],
+    format = "f",
+    digits = 1,
+    decimal.mark = ","
+  )
+  sprintf("Dimensão %d (%s%%)", dim_index, pct)
+}
+
+# Remove linhas tracejadas padrão (x = 0, y = 0) inseridas pelo factoextra
+remove_dashed_lines <- function(plot) {
+  plot$layers <- Filter(
+    function(layer) !inherits(layer$geom, c("GeomHline", "GeomVline")),
+    plot$layers
+  )
+  plot
+}
+
+# Adiciona eixos cartesianos cruzando na origem
+add_center_axes <- function(plot) {
+  plot <- remove_dashed_lines(plot)
   
-  gb <- ggplot_build(p)
-  xr <- gb$layout$panel_params[[1]]$x.range
-  yr <- gb$layout$panel_params[[1]]$y.range
+  built <- ggplot_build(plot)
+  x_range <- built$layout$panel_params[[1]]$x.range
+  y_range <- built$layout$panel_params[[1]]$y.range
   
-  seta <- grid::arrow(length = grid::unit(0.2, "cm"), type = "closed")
+  axis_arrow <- grid::arrow(length = grid::unit(0.2, "cm"), type = "closed")
   
-  eixos <- list(
+  axis_layers <- list(
     annotate(
       "segment",
-      x = xr[1], xend = xr[2], y = 0, yend = 0,
-      color = "black", linewidth = 0.5, arrow = seta
+      x = x_range[1], xend = x_range[2], y = 0, yend = 0,
+      color = "black", linewidth = 0.5, arrow = axis_arrow
     ),
     annotate(
       "segment",
-      x = 0, xend = 0, y = yr[1], yend = yr[2],
-      color = "black", linewidth = 0.5, arrow = seta
+      x = 0, xend = 0, y = y_range[1], yend = y_range[2],
+      color = "black", linewidth = 0.5, arrow = axis_arrow
     )
   )
   
-  p$layers <- c(eixos, p$layers)
+  plot$layers <- c(axis_layers, plot$layers)
   
   # Trava os limites já calculados se nenhum coord_cartesian prévio existir
-  if (is.null(p$coordinates$limits$x) && is.null(p$coordinates$limits$y)) {
-    p <- p + coord_cartesian(xlim = xr, ylim = yr, expand = FALSE)
+  if (is.null(plot$coordinates$limits$x) && is.null(plot$coordinates$limits$y)) {
+    plot <- plot + coord_cartesian(xlim = x_range, ylim = y_range, expand = FALSE)
   }
   
-  p
+  plot
 }
 
-dir.create("figuras", showWarnings = FALSE)
-
-salvar_ggplot <- function(plot, filename, width = 8, height = 5.5, dpi = 300) {
+save_ggplot <- function(plot, filename, width = 8, height = 5.5, dpi = 300) {
   showtext_opts(dpi = dpi)
   on.exit(showtext_opts(dpi = 96), add = TRUE)
   
   ggsave(
-    filename = file.path("figuras", filename),
+    filename = file.path(output_dir, filename),
     plot = plot,
     width = width,
     height = height,
@@ -145,107 +229,181 @@ mca_result <- MCA(
   graph = FALSE
 )
 
-# 6. GRÁFICO 1: MATRIZ DE ASSOCIAÇÃO (ETA²) ------------------------------------
-eta2_matriz <- rbind(
+# 6. GRÁFICO 1: MATRIZ DE ASSOCIAÇÃO -------------------------------------------
+eta2_matrix <- rbind(
   mca_result$var$eta2,
-  "final_result (sup)" = mca_result$quali.sup$eta2
+  mca_result$quali.sup$eta2
 )
 
-desenhar_corrplot <- function(matriz) {
-  op <- par(family = "roboto", col.main = "#1a505c", font.main = 2)
-  on.exit(par(op), add = TRUE)
+row_keys <- rownames(eta2_matrix)
+rownames(eta2_matrix) <- ifelse(
+  row_keys == "final_result",
+  paste0(var_labels["final_result"]),
+  unname(var_labels[row_keys])
+)
+colnames(eta2_matrix) <- paste("Dimensão", seq_len(ncol(eta2_matrix)))
+
+draw_corrplot <- function(mat) {
+  old_par <- par(family = "roboto", col.main = "#1a505c", font.main = 2)
+  on.exit(par(old_par), add = TRUE)
   
-  col_mca <- colorRampPalette(c("white", "#6baed6", "#2171b5"))
+  mca_palette <- colorRampPalette(c("indianred", "white", "steelblue"))
+  upper_limit <- ceiling(max(mat) * 10) / 10
+  
   corrplot(
-    matriz,
+    mat,
     is.corr = FALSE,
-    col.lim = c(0, max(matriz)),
-    col = col_mca(20),
-    addCoef.col = "black",
-    number.cex = 0.72,
+    col.lim = c(0, upper_limit),
+    col = mca_palette(100),
+    addgrid.col = "black",
     tl.col = "black",
-    cl.cex = 0.8,
     tl.cex = 0.9,
-    mar = c(0, 0, 2.5, 0),
-    cl.offset = 0.2,
-    title = "MCA · Associação das Variáveis (Eta²)"
+    cl.cex = 0.8,
+    cl.length = 5,
+    cl.align.text = "l",
+    cl.offset = 0.5,
+    cl.ratio = 0.22,
+    mar = c(0, 0, 2.5, 1.5),
+    title = "MCA · Associação das Variáveis"
   )
 }
 
-salvar_corrplot <- function(matriz, filename, width = 7, height = 6, dpi = 300) {
+save_corrplot <- function(mat, filename, width = 7, height = 6, dpi = 300) {
   showtext_opts(dpi = dpi)
   on.exit(showtext_opts(dpi = 96), add = TRUE)
   
   png(
-    file.path("figuras", filename),
+    file.path(output_dir, filename),
     width = width, height = height, units = "in", res = dpi, bg = "white"
   )
   on.exit(dev.off(), add = TRUE)
   
-  desenhar_corrplot(matriz)
+  draw_corrplot(mat)
 }
 
-desenhar_corrplot(eta2_matriz)
-salvar_corrplot(eta2_matriz, "01_associacao_eta2.png")
+draw_corrplot(eta2_matrix)
+save_corrplot(
+  eta2_matrix,
+  "01_eta2_association.png"
+)
 
-# 7. GRÁFICO 2: SCREE PLOT -----------------------------------------------------
-p_scree <- fviz_eig(
+# 7. GRÁFICO 2: VARIÂNCIA EXPLICADA --------------------------------------------
+plot_scree <- fviz_eig(
   mca_result,
   addlabels = TRUE,
-  title = "MCA · Scree Plot",
-  ggtheme = theme_oulad
+  ggtheme = theme_oulad,
+  ylim = c(0, 10)
 ) +
-  tema_bordas
+  labs(
+    title = "MCA · Variância Explicada por Dimensão",
+    x = "Dimensões",
+    y = "Variância explicada (%)"
+  ) +
+  theme_border_axes
 
-print(p_scree)
-salvar_ggplot(p_scree, "02_scree_plot.png", width = 7.5, height = 5)
+print(plot_scree)
+save_ggplot(
+  plot_scree,
+  "02_scree_plot.png",
+  width = 7.5,
+  height = 5
+)
 
 # 8. GRÁFICO 3: CORRELAÇÃO DAS VARIÁVEIS COM OS EIXOS --------------------------
-p_cor <- fviz_mca_var(
-  mca_result,
+mca_cor_display <- mca_result
+rownames(mca_cor_display$var$eta2) <- unname(
+  var_labels[rownames(mca_cor_display$var$eta2)]
+)
+rownames(mca_cor_display$quali.sup$eta2) <- unname(
+  var_labels[rownames(mca_cor_display$quali.sup$eta2)]
+)
+
+plot_cor <- fviz_mca_var(
+  mca_cor_display,
   choice = "mca.cor",
   repel = TRUE,
-  title = "MCA · Correlação das Variáveis com os Eixos",
   ggtheme = theme_oulad
 ) %>%
-  remover_linhas_tracejadas() +
-  tema_bordas
+  remove_dashed_lines() +
+  labs(
+    title = "MCA · Correlação das Variáveis com os Eixos",
+    x = format_dim_label(mca_result, 1),
+    y = format_dim_label(mca_result, 2)
+  ) +
+  theme_border_axes
 
-print(p_cor)
-salvar_ggplot(p_cor, "03_correlacao_variaveis.png", width = 8, height = 6)
+print(plot_cor)
+save_ggplot(
+  plot_cor,
+  "03_variable_correlation.png",
+  width = 8,
+  height = 6
+)
 
 # 9. GRÁFICOS 4 A 10: ELIPSES DE CONCENTRAÇÃO POR VARIÁVEL ---------------------
-vars_grupo <- names(oulad_mca)
+group_vars <- names(oulad_mca)
 
-for (i in seq_along(vars_grupo)) {
-  v <- vars_grupo[i]
-  p_grupo <- fviz_mca_ind(
+for (i in seq_along(group_vars)) {
+  var_name <- group_vars[i]
+  var_label <- unname(var_labels[var_name])
+  group_values <- translate_labels(
+    oulad_mca[[var_name]],
+    category_labels[[var_name]]
+  )
+  
+  plot_group <- fviz_mca_ind(
     mca_result,
     axes = c(1, 2),
     geom.ind = "point",
     alpha.ind = 0.05,
-    habillage = oulad_mca[[v]],
+    habillage = group_values,
     addEllipses = TRUE,
     ellipse.level = 0.68,
     label = "none",
-    title = paste("MCA · Grupos por", v),
+    legend.title = var_label,
     ggtheme = theme_oulad
-  ) %>%
-    eixos_centrais()
+  ) +
+    labs(
+      title = paste("ACM · Grupos por", var_label),
+      x = format_dim_label(mca_result, 1),
+      y = format_dim_label(mca_result, 2)
+    )
   
-  print(p_grupo)
-  salvar_ggplot(p_grupo, sprintf("%02d_mca_grupo_%s.png", i + 3, v), width = 8, height = 6)
+  plot_group <- add_center_axes(plot_group)
+  
+  print(plot_group)
+  save_ggplot(
+    plot_group,
+    sprintf("%02d_mca_group_%s.png", i + 3, var_name),
+    width = 8,
+    height = 6
+  )
 }
 
-# 10. GRÁFICOS 11 A 13: SOBREPOSIÇÕES PERSONALIZADAS (super.R) -----------------
-p_sup1 <- highest_level_and_age_band(mca_result, oulad_clean)
-print(p_sup1)
-salvar_ggplot(p_sup1, "11_idade_pos_graduacao.png", width = 8.5, height = 6)
+# 10. GRÁFICOS 11 A 13: SOBREPOSIÇÕES ------------------------------------------
+plot_overlay_1 <- highest_level_and_age_band(mca_result, oulad_clean)
+print(plot_overlay_1)
+save_ggplot(
+  plot_overlay_1,
+  "11_age_postgraduate.png",
+  width = 8.5,
+  height = 6
+)
 
-p_sup2 <- imd_band_and_highest_education(mca_result, oulad_clean)
-print(p_sup2)
-salvar_ggplot(p_sup2, "12_imd_escolaridade.png", width = 8.5, height = 6)
+plot_overlay_2 <- imd_band_and_highest_education(mca_result, oulad_clean)
+print(plot_overlay_2)
+save_ggplot(
+  plot_overlay_2,
+  "12_imd_education.png",
+  width = 8.5,
+  height = 6
+)
 
-p_sup3 <- code_module_and_gender(mca_result, oulad_clean)
-print(p_sup3)
-salvar_ggplot(p_sup3, "13_modulo_genero.png", width = 8.5, height = 6)
+plot_overlay_3 <- code_module_and_gender(mca_result, oulad_clean)
+print(plot_overlay_3)
+save_ggplot(
+  plot_overlay_3,
+  "13_module_gender.png",
+  width = 8.5,
+  height = 6
+)

@@ -7,108 +7,131 @@ library(ggrepel)
 
 # 1. FUNÇÕES AUXILIARES INTERNAS -----------------------------------------------
 
+format_axis_label <- function(variance_pct, dim_index) {
+  formatted_pct <- formatC(
+    variance_pct,
+    format = "f",
+    digits = 1,
+    decimal.mark = ","
+  )
+  sprintf("Dimensão %d (%s%%)", dim_index, formatted_pct)
+}
+
 # Extrai coordenadas fatoriais (Dim 1 e Dim 2), valida dimensões e une metadados
-extrair_dados_mca <- function(mca_result, oulad_clean) {
+extract_mca_data <- function(mca_result, oulad_clean) {
   coords <- as.data.frame(mca_result$ind$coord)
   
   if (nrow(coords) != nrow(oulad_clean)) {
     stop("O número de indivíduos em `mca_result` difere de `oulad_clean`.")
   }
   
-  dados <- coords %>%
-    rename(Dim1 = `Dim 1`, Dim2 = `Dim 2`) %>%
+  data <- coords %>%
+    rename(dim1 = `Dim 1`, dim2 = `Dim 2`) %>%
     bind_cols(oulad_clean)
   
   list(
-    dados = dados,
-    var_dim1 = round(mca_result$eig[1, 2], 1),
-    var_dim2 = round(mca_result$eig[2, 2], 1)
+    data = data,
+    dim1_label = format_axis_label(mca_result$eig[1, 2], 1),
+    dim2_label = format_axis_label(mca_result$eig[2, 2], 2)
   )
 }
 
-# Garante independência caso super.R seja carregado sem mca.R
-aplicar_eixos_centrais <- function(p) {
-  if (exists("eixos_centrais", mode = "function")) {
-    return(eixos_centrais(p))
+# Garante independência caso super.R seja carregado sem o script principal
+apply_center_axes <- function(plot) {
+  if (exists("add_center_axes", mode = "function")) {
+    return(add_center_axes(plot))
   }
   
-  gb <- ggplot_build(p)
-  xr <- gb$layout$panel_params[[1]]$x.range
-  yr <- gb$layout$panel_params[[1]]$y.range
-  seta <- grid::arrow(length = grid::unit(0.2, "cm"), type = "closed")
+  built <- ggplot_build(plot)
+  x_range <- built$layout$panel_params[[1]]$x.range
+  y_range <- built$layout$panel_params[[1]]$y.range
+  axis_arrow <- grid::arrow(length = grid::unit(0.2, "cm"), type = "closed")
   
-  eixos <- list(
-    annotate("segment", x = xr[1], xend = xr[2], y = 0, yend = 0, color = "black", linewidth = 0.5, arrow = seta),
-    annotate("segment", x = 0, xend = 0, y = yr[1], yend = yr[2], color = "black", linewidth = 0.5, arrow = seta)
+  axis_layers <- list(
+    annotate(
+      "segment",
+      x = x_range[1], xend = x_range[2], y = 0, yend = 0,
+      color = "black", linewidth = 0.5, arrow = axis_arrow
+    ),
+    annotate(
+      "segment",
+      x = 0, xend = 0, y = y_range[1], yend = y_range[2],
+      color = "black", linewidth = 0.5, arrow = axis_arrow
+    )
   )
   
-  p$layers <- c(eixos, p$layers)
-  p
+  plot$layers <- c(axis_layers, plot$layers)
+  
+  if (is.null(plot$coordinates$limits$x) && is.null(plot$coordinates$limits$y)) {
+    plot <- plot + coord_cartesian(xlim = x_range, ylim = y_range, expand = FALSE)
+  }
+  
+  plot
 }
 
-# Calcula limites simétricos/adaptativos com folga para evitar cortes se eixos inverterem
-calcular_limites_seguros <- function(df, margem = 0.25) {
+# Calcula limites adaptativos com folga para evitar cortes se eixos inverterem
+compute_safe_limits <- function(data, margin = 0.25) {
   list(
-    xlim = range(df$Dim1, na.rm = TRUE) + c(-margem, margem),
-    ylim = range(df$Dim2, na.rm = TRUE) + c(-margem, margem)
+    xlim = range(data$dim1, na.rm = TRUE) + c(-margin, margin),
+    ylim = range(data$dim2, na.rm = TRUE) + c(-margin, margin)
   )
 }
 
 # 2. GRÁFICO 11: FAIXA ETÁRIA (55+) VS. PÓS-GRADUAÇÃO --------------------------
 highest_level_and_age_band <- function(mca_result, oulad_clean) {
-  mca_info <- extrair_dados_mca(mca_result, oulad_clean)
+  mca_info <- extract_mca_data(mca_result, oulad_clean)
   
-  mca_coords <- mca_info$dados %>%
+  mca_coords <- mca_info$data %>%
     mutate(
-      eh_55_mais = age_band == "55<=",
-      eh_pos_grad = highest_education == "Post Graduate Qualification",
-      perfil_destaque = case_when(
-        eh_55_mais & eh_pos_grad ~ "Ambos (55+ e Pós-graduação)",
-        eh_55_mais               ~ "55+",
-        eh_pos_grad              ~ "Pós-graduação",
-        TRUE                     ~ "Demais alunos"
+      is_age_55_plus = age_band == "55<=",
+      is_postgrad = highest_education == "Post Graduate Qualification",
+      highlight_group = case_when(
+        is_age_55_plus & is_postgrad ~ "Ambos (55+ e Pós-graduação)",
+        is_age_55_plus               ~ "55+",
+        is_postgrad                  ~ "Pós-graduação",
+        TRUE                         ~ "Demais alunos"
       ),
-      perfil_destaque = factor(
-        perfil_destaque,
+      highlight_group = factor(
+        highlight_group,
         levels = c("55+", "Pós-graduação", "Ambos (55+ e Pós-graduação)", "Demais alunos")
       )
     )
   
-  # Centróides calculados sobre os grupos completos (incluindo a interseção)
-  centroides <- bind_rows(
+  # Centroides calculados sobre os grupos completos (incluindo a interseção)
+  centroids <- bind_rows(
     mca_coords %>%
-      filter(eh_55_mais) %>%
-      summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), grupo = "Centróide: 55+"),
+      filter(is_age_55_plus) %>%
+      summarise(dim1 = mean(dim1), dim2 = mean(dim2), group = "Centroide: 55+"),
     mca_coords %>%
-      filter(eh_pos_grad) %>%
-      summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), grupo = "Centróide: Pós-graduação")
+      filter(is_postgrad) %>%
+      summarise(dim1 = mean(dim1), dim2 = mean(dim2), group = "Centroide: Pós-graduação")
   ) %>%
-    mutate(grupo = factor(grupo, levels = c("Centróide: 55+", "Centróide: Pós-graduação")))
+    mutate(group = factor(group, levels = c("Centroide: 55+", "Centroide: Pós-graduação")))
   
-  p_sobreposicao <- ggplot(mca_coords, aes(x = Dim1, y = Dim2)) +
+  plot_overlay <- ggplot(mca_coords, aes(x = dim1, y = dim2)) +
     geom_point(
-      data = filter(mca_coords, perfil_destaque == "Demais alunos"),
+      data = filter(mca_coords, highlight_group == "Demais alunos"),
       color = "grey80", alpha = 0.15, size = 1.2
     ) +
     geom_point(
-      data = filter(mca_coords, perfil_destaque != "Demais alunos"),
-      aes(color = perfil_destaque), alpha = 0.65, size = 1.8
+      data = filter(mca_coords, highlight_group != "Demais alunos"),
+      aes(color = highlight_group), alpha = 0.65, size = 1.8
     ) +
     stat_ellipse(
-      data = filter(mca_coords, eh_55_mais),
-      aes(linetype = "Elipse: 55+"),
-      color = "#0072B2", fill = "#0072B2", geom = "polygon",
+      data = filter(mca_coords, is_age_55_plus),
+      aes(fill = "Elipse: 55+"),
+      color = "#0072B2", geom = "polygon", linetype = "solid",
       alpha = 0.12, level = 0.68, linewidth = 0.9
     ) +
     stat_ellipse(
-      data = filter(mca_coords, eh_pos_grad),
-      aes(linetype = "Elipse: Pós-graduação"),
-      color = "#CC79A7", fill = "#CC79A7", geom = "polygon",
+      data = filter(mca_coords, is_postgrad),
+      aes(fill = "Elipse: Pós-graduação"),
+      color = "#CC79A7", geom = "polygon", linetype = "solid",
       alpha = 0.12, level = 0.68, linewidth = 0.9
     ) +
     geom_point(
-      data = centroides,
-      aes(shape = grupo),
+      data = centroids,
+      aes(shape = group),
       color = c("#0072B2", "#CC79A7"), size = 4
     ) +
     scale_color_manual(
@@ -119,97 +142,112 @@ highest_level_and_age_band <- function(mca_result, oulad_clean) {
         "Ambos (55+ e Pós-graduação)" = "#009E73"
       )
     ) +
-    scale_linetype_manual(
+    scale_fill_manual(
       name = "Fronteiras (68%)",
-      values = c("Elipse: 55+" = "solid", "Elipse: Pós-graduação" = "dashed")
+      breaks = c("Elipse: 55+", "Elipse: Pós-graduação"),
+      values = c("Elipse: 55+" = "#0072B2", "Elipse: Pós-graduação" = "#CC79A7")
     ) +
     scale_shape_manual(
-      name = "Centróides",
-      values = c("Centróide: 55+" = 16, "Centróide: Pós-graduação" = 17)
+      name = "Centroides",
+      values = c("Centroide: 55+" = 16, "Centroide: Pós-graduação" = 17)
     ) +
     guides(
+      fill = guide_legend(
+        override.aes = list(
+          color = c("#0072B2", "#CC79A7"),
+          alpha = 0.2,
+          linewidth = 0.9
+        )
+      ),
       shape = guide_legend(
         override.aes = list(color = c("#0072B2", "#CC79A7"), size = 4)
       )
     ) +
     labs(
       title = "MCA · Sobreposição entre Faixa Etária (55+) e Pós-Graduação",
-      x = paste0("Dim1 (", mca_info$var_dim1, "%)"),
-      y = paste0("Dim2 (", mca_info$var_dim2, "%)")
+      x = mca_info$dim1_label,
+      y = mca_info$dim2_label
     )
   
-  aplicar_eixos_centrais(p_sobreposicao)
+  apply_center_axes(plot_overlay)
 }
 
-# 3. GRÁFICO 12: TRAJETÓRIAS DE IMD BAND VS. ESCOLARIDADE ----------------------
+# 3. GRÁFICO 12: TRAJETÓRIAS DE FAIXA IMD VS. ESCOLARIDADE ---------------------
 imd_band_and_highest_education <- function(mca_result, oulad_clean) {
-  mca_info <- extrair_dados_mca(mca_result, oulad_clean)
+  mca_info <- extract_mca_data(mca_result, oulad_clean)
   
   # Garante ordenação explícita independente do estado prévio dos fatores
-  niveis_imd <- c(
+  imd_levels <- c(
     "0-10%", "10-20%", "20-30%", "30-40%", "40-50%",
     "50-60%", "60-70%", "70-80%", "80-90%", "90-100%"
   )
-  niveis_edu <- c(
+  education_levels <- c(
     "No Formal quals", "Lower Than A Level", "A Level or Equivalent",
     "HE Qualification", "Post Graduate Qualification"
   )
+  education_labels <- c(
+    "No Formal quals" = "Sem qualificação formal",
+    "Lower Than A Level" = "Inferior ao Ensino Médio",
+    "A Level or Equivalent" = "Ensino Médio ou equivalente",
+    "HE Qualification" = "Ensino Superior",
+    "Post Graduate Qualification" = "Pós-graduação"
+  )
   
-  mca_coords <- mca_info$dados %>%
+  mca_coords <- mca_info$data %>%
     mutate(
-      imd_band = factor(imd_band, levels = niveis_imd),
-      highest_education = factor(highest_education, levels = niveis_edu)
+      imd_band = factor(imd_band, levels = imd_levels),
+      highest_education = factor(highest_education, levels = education_levels)
     )
   
-  cent_imd <- mca_coords %>%
-    group_by(categoria = imd_band) %>%
-    summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), .groups = "drop") %>%
-    arrange(categoria) %>%
+  imd_centroids <- mca_coords %>%
+    group_by(category = imd_band) %>%
+    summarise(dim1 = mean(dim1), dim2 = mean(dim2), .groups = "drop") %>%
+    arrange(category) %>%
     mutate(
-      variavel = "IMD Band (Socioeconômico)",
-      rotulo = ifelse(
-        categoria %in% c("0-10%", "20-30%", "40-50%", "60-70%", "80-90%", "90-100%"),
-        as.character(categoria),
+      variable = "Faixa IMD (Socioeconômico)",
+      label = ifelse(
+        category %in% c("0-10%", "20-30%", "40-50%", "60-70%", "80-90%", "90-100%"),
+        as.character(category),
         ""
       )
     )
   
-  cent_edu <- mca_coords %>%
-    group_by(categoria = highest_education) %>%
-    summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), .groups = "drop") %>%
-    arrange(categoria) %>%
+  education_centroids <- mca_coords %>%
+    group_by(category = highest_education) %>%
+    summarise(dim1 = mean(dim1), dim2 = mean(dim2), .groups = "drop") %>%
+    arrange(category) %>%
     mutate(
-      variavel = "Highest Education (Escolaridade)",
-      rotulo = as.character(categoria)
+      variable = "Escolaridade",
+      label = unname(education_labels[as.character(category)])
     )
   
-  todos_centroides <- bind_rows(cent_imd, cent_edu)
-  limites <- calcular_limites_seguros(todos_centroides, margem = 0.65)
+  all_centroids <- bind_rows(imd_centroids, education_centroids)
+  limits <- compute_safe_limits(all_centroids, margin = 0.65)
   
-  p_exp <- ggplot(mca_coords, aes(x = Dim1, y = Dim2)) +
+  plot_trajectories <- ggplot(mca_coords, aes(x = dim1, y = dim2)) +
     geom_point(color = "grey85", alpha = 0.08, size = 1) +
     geom_path(
-      data = cent_edu, aes(group = 1),
+      data = education_centroids, aes(group = 1),
       color = "#D55E00", linewidth = 1.4, alpha = 0.45
     ) +
     geom_path(
-      data = cent_imd, aes(group = 1),
+      data = imd_centroids, aes(group = 1),
       color = "#0072B2", linewidth = 0.9, alpha = 0.9
     ) +
     geom_point(
-      data = todos_centroides,
-      aes(color = variavel, shape = variavel), size = 3.2
+      data = all_centroids,
+      aes(color = variable, shape = variable), size = 3.2
     ) +
     geom_text_repel(
-      data = filter(cent_imd, rotulo != ""),
-      aes(label = rotulo),
+      data = filter(imd_centroids, label != ""),
+      aes(label = label),
       color = "#0072B2", size = 3.1, fontface = "bold",
       nudge_x = -0.35, hjust = 1, direction = "y",
       segment.color = "#0072B2", segment.alpha = 0.5, max.overlaps = Inf
     ) +
     geom_text_repel(
-      data = cent_edu,
-      aes(label = rotulo),
+      data = education_centroids,
+      aes(label = label),
       color = "#D55E00", size = 3.2, fontface = "bold",
       nudge_x = 0.35, hjust = 0, direction = "y",
       segment.color = "#D55E00", segment.alpha = 0.5, max.overlaps = Inf
@@ -217,69 +255,69 @@ imd_band_and_highest_education <- function(mca_result, oulad_clean) {
     scale_color_manual(
       name = "Variável",
       values = c(
-        "IMD Band (Socioeconômico)" = "#0072B2",
-        "Highest Education (Escolaridade)" = "#D55E00"
+        "Faixa IMD (Socioeconômico)" = "#0072B2",
+        "Escolaridade" = "#D55E00"
       )
     ) +
     scale_shape_manual(
       name = "Variável",
       values = c(
-        "IMD Band (Socioeconômico)" = 16,
-        "Highest Education (Escolaridade)" = 17
+        "Faixa IMD (Socioeconômico)" = 16,
+        "Escolaridade" = 17
       )
     ) +
-    coord_cartesian(xlim = limites$xlim, ylim = limites$ylim) +
+    coord_cartesian(xlim = limits$xlim, ylim = limits$ylim) +
     labs(
-      title = "MCA · Trajetórias Ordenadas: IMD Band vs. Escolaridade",
-      subtitle = "Centróides conectados por ordem crescente (rótulos de IMD à esquerda e de Escolaridade à direita)",
-      x = paste0("Dim1 (", mca_info$var_dim1, "%)"),
-      y = paste0("Dim2 (", mca_info$var_dim2, "%)")
+      title = "MCA · Trajetórias Ordenadas: Faixa IMD vs. Escolaridade",
+      subtitle = "Centroides conectados em ordem crescente (rótulos de Faixa IMD à esquerda e de Escolaridade à direita)",
+      x = mca_info$dim1_label,
+      y = mca_info$dim2_label
     )
   
-  aplicar_eixos_centrais(p_exp)
+  apply_center_axes(plot_trajectories)
 }
 
 # 4. GRÁFICO 13: ASSOCIAÇÃO ENTRE MÓDULO E GÊNERO ------------------------------
 code_module_and_gender <- function(mca_result, oulad_clean) {
-  mca_info <- extrair_dados_mca(mca_result, oulad_clean)
-  mca_coords <- mca_info$dados
+  mca_info <- extract_mca_data(mca_result, oulad_clean)
+  mca_coords <- mca_info$data
   
-  cent_gender <- mca_coords %>%
+  gender_centroids <- mca_coords %>%
     group_by(gender) %>%
-    summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), .groups = "drop")
+    summarise(dim1 = mean(dim1), dim2 = mean(dim2), .groups = "drop")
   
-  cent_modules <- mca_coords %>%
+  module_centroids <- mca_coords %>%
     group_by(code_module) %>%
     summarise(
-      Dim1 = mean(Dim1),
-      Dim2 = mean(Dim2),
-      pct_f = round(mean(gender == "F", na.rm = TRUE) * 100, 0),
+      dim1 = mean(dim1),
+      dim2 = mean(dim2),
+      pct_female = round(mean(gender == "F", na.rm = TRUE) * 100, 0),
       .groups = "drop"
     ) %>%
-    mutate(rotulo = paste0(code_module, " (", pct_f, "% F)"))
+    mutate(label = paste0(code_module, " (", pct_female, "% F)"))
   
-  limites <- calcular_limites_seguros(
-    bind_rows(cent_gender, cent_modules),
-    margem = 0.85
+  limits <- compute_safe_limits(
+    bind_rows(gender_centroids, module_centroids),
+    margin = 0.85
   )
   
-  p_mod_gen <- ggplot(mca_coords, aes(x = Dim1, y = Dim2)) +
+  plot_module_gender <- ggplot(mca_coords, aes(x = dim1, y = dim2)) +
     geom_point(aes(color = gender), alpha = 0.08, size = 1.2) +
     stat_ellipse(
       aes(color = gender, fill = gender),
       geom = "polygon", alpha = 0.14, level = 0.68, linewidth = 0.9
     ) +
     geom_point(
-      data = cent_gender,
+      data = gender_centroids,
       aes(color = gender), size = 3.5, shape = 15, show.legend = FALSE
     ) +
     geom_point(
-      data = cent_modules,
+      data = module_centroids,
       shape = 21, fill = "white", color = "black", stroke = 1.2, size = 3.5
     ) +
     geom_text_repel(
-      data = cent_modules,
-      aes(label = rotulo),
+      data = module_centroids,
+      aes(label = label),
       color = "black", bg.color = "white", bg.r = 0.12,
       size = 3.4, fontface = "bold", box.padding = 0.45, max.overlaps = Inf
     ) +
@@ -296,13 +334,13 @@ code_module_and_gender <- function(mca_result, oulad_clean) {
     guides(
       color = guide_legend(override.aes = list(alpha = 0.35))
     ) +
-    coord_cartesian(xlim = limites$xlim, ylim = limites$ylim) +
+    coord_cartesian(xlim = limits$xlim, ylim = limits$ylim) +
     labs(
-      title = "MCA · Associação entre Módulo (code_module) e Gênero",
-      subtitle = "Elipses de gênero (68%) sobrepostas aos centróides e proporção feminina de cada módulo",
-      x = paste0("Dim1 (", mca_info$var_dim1, "%)"),
-      y = paste0("Dim2 (", mca_info$var_dim2, "%)")
+      title = "MCA · Associação entre Módulo e Gênero",
+      subtitle = "Elipses de gênero (68%) sobrepostas aos centroides e proporção feminina de cada módulo",
+      x = mca_info$dim1_label,
+      y = mca_info$dim2_label
     )
   
-  aplicar_eixos_centrais(p_mod_gen)
+  apply_center_axes(plot_module_gender)
 }
