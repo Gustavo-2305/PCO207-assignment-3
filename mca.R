@@ -238,53 +238,105 @@ eta2_matrix <- rbind(
 row_keys <- rownames(eta2_matrix)
 rownames(eta2_matrix) <- ifelse(
   row_keys == "final_result",
-  paste0(var_labels["final_result"]),
+  unname(var_labels["final_result"]),
   unname(var_labels[row_keys])
 )
 colnames(eta2_matrix) <- paste("Dimensão", seq_len(ncol(eta2_matrix)))
 
-draw_corrplot <- function(mat) {
-  old_par <- par(family = "roboto", col.main = "#1a505c", font.main = 2)
-  on.exit(par(old_par), add = TRUE)
+make_circle_df <- function(df, max_value, max_radius = 0.44, n_points = 60) {
+  angles <- seq(0, 2 * pi, length.out = n_points)
   
-  mca_palette <- colorRampPalette(c("indianred", "white", "steelblue"))
-  upper_limit <- ceiling(max(mat) * 10) / 10
-  
-  corrplot(
-    mat,
-    is.corr = FALSE,
-    col.lim = c(0, upper_limit),
-    col = mca_palette(100),
-    addgrid.col = "black",
-    tl.col = "black",
-    tl.cex = 0.9,
-    cl.cex = 0.8,
-    cl.length = 5,
-    cl.align.text = "l",
-    cl.offset = 0.5,
-    cl.ratio = 0.22,
-    mar = c(0, 0, 2.5, 1.5),
-    title = "MCA · Associação das Variáveis"
-  )
+  df %>%
+    mutate(
+      x_center = as.numeric(dimension),
+      y_center = as.numeric(variable),
+      radius = max_radius * sqrt(pmax(eta2, 0) / max_value),
+      cell_id = row_number()
+    ) %>%
+    reframe(
+      x = x_center + radius * cos(angles),
+      y = y_center + radius * sin(angles),
+      eta2 = eta2,
+      .by = cell_id
+    )
 }
 
-save_corrplot <- function(mat, filename, width = 7, height = 6, dpi = 300) {
-  showtext_opts(dpi = dpi)
-  on.exit(showtext_opts(dpi = 96), add = TRUE)
-  
-  png(
-    file.path(output_dir, filename),
-    width = width, height = height, units = "in", res = dpi, bg = "white"
+eta2_df <- as.data.frame(eta2_matrix) %>%
+  rownames_to_column(var = "variable") %>%
+  pivot_longer(
+    cols = -variable,
+    names_to = "dimension",
+    values_to = "eta2"
+  ) %>%
+  mutate(
+    variable = factor(variable, levels = rev(rownames(eta2_matrix))),
+    dimension = factor(dimension, levels = colnames(eta2_matrix))
   )
-  on.exit(dev.off(), add = TRUE)
-  
-  draw_corrplot(mat)
-}
 
-draw_corrplot(eta2_matrix)
-save_corrplot(
-  eta2_matrix,
-  "01_eta2_association.png"
+upper_limit <- ceiling(max(eta2_df$eta2) * 10) / 10
+circles_df <- make_circle_df(eta2_df, max_value = upper_limit)
+
+plot_eta2 <- ggplot() +
+  geom_tile(
+    data = eta2_df,
+    aes(x = as.numeric(dimension), y = as.numeric(variable)),
+    fill = "white",
+    color = "black",
+    linewidth = 0.4
+  ) +
+  geom_polygon(
+    data = circles_df,
+    aes(x = x, y = y, group = cell_id, fill = eta2),
+    color = NA
+  ) +
+  scale_x_continuous(
+    breaks = seq_len(ncol(eta2_matrix)),
+    labels = colnames(eta2_matrix),
+    position = "top",
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    breaks = seq_len(nrow(eta2_matrix)),
+    labels = rev(rownames(eta2_matrix)),
+    expand = c(0, 0)
+  ) +
+  scale_fill_gradientn(
+    colors = c("indianred", "white", "steelblue"),
+    limits = c(0, upper_limit),
+    breaks = seq(0, upper_limit, length.out = 5),
+    labels = function(x) formatC(x, format = "f", digits = 2, decimal.mark = ","),
+    name = NULL
+  ) +
+  guides(
+    fill = guide_colorbar(
+      barwidth = unit(0.55, "cm"),
+      barheight = unit(9, "cm"),
+      theme = theme(
+        legend.frame = element_rect(color = "black", linewidth = 0.4),
+        legend.ticks = element_line(color = "black", linewidth = 0.4)
+      )
+    )
+  ) +
+  coord_fixed(ratio = 1, clip = "off") +
+  labs(
+    title = "MCA · Associação das Variáveis",
+    x = NULL,
+    y = NULL
+  ) +
+  theme(
+    axis.ticks = element_blank(),
+    axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0),
+    plot.title.position = "plot",
+    plot.title = element_text(margin = margin(b = 8)),
+    plot.margin = margin(t = 10, r = 10, b = 8, l = 10)
+  )
+
+print(plot_eta2)
+save_ggplot(
+  plot_eta2,
+  "01_eta2_association.png",
+  width = 5.8,
+  height = 5.4
 )
 
 # 7. GRÁFICO 2: VARIÂNCIA EXPLICADA --------------------------------------------
